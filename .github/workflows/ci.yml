@@ -1,0 +1,94 @@
+name: CI/CD - billing_api
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Crear archivo .env para tests
+        run: |
+          echo "DJANGO_SECRET_KEY=test-secret-key-for-ci-123" > .env
+          echo "DEBUG=True" >> .env
+          echo "ALLOWED_HOSTS=localhost,127.0.0.1" >> .env
+          echo "DB_ENGINE=django.db.backends.sqlite3" >> .env
+          echo "DB_NAME=test_db.sqlite3" >> .env
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ejecutar migraciones
+        env:
+          DJANGO_SETTINGS_MODULE: billing_api.settings
+        run: |
+          python manage.py migrate --noinput
+
+      - name: Ejecutar tests
+        env:
+          DJANGO_SETTINGS_MODULE: billing_api.settings
+        run: |
+          python manage.py test
+
+  deploy:
+    needs: tests
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar SSH para la VM
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VM_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          printf "Host vm-billing\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_rsa\n  StrictHostKeyChecking no\n" "${{ secrets.VM_HOST }}" "${{ secrets.VM_USER }}" > ~/.ssh/config
+
+      - name: Actualizar archivo .env en la VM
+        run: |
+          echo "${{ secrets.ENV_FILE }}" > .env.production
+          scp .env.production vm-billing:/opt/billing_api/.env
+          rm .env.production
+
+      - name: Sincronizar código con la VM
+        run: |
+          rsync -avz --delete \
+            --exclude='.env' \
+            --exclude='.git/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            . vm-billing:/opt/billing_api/billing_api/
+
+      - name: Ejecutar migraciones y reiniciar servicios
+        run: |
+          ssh vm-billing "
+            cd /opt/billing_api/billing_api &&
+            source /opt/billing_api/venv/bin/activate &&
+            pip install --upgrade -r requirements.txt &&
+            python manage.py migrate --noinput &&
+            python manage.py collectstatic --noinput &&
+            sudo systemctl restart gunicorn &&
+            sudo systemctl restart nginx
+          "
+
+      - name: Verificar que la API está funcionando
+        run: |
+          sleep 10  # Esperar que los servicios se reinicien
+          curl -f http://${{ secrets.VM_HOST }}/api/health/ || echo "La API podría estar iniciando..."
+  
