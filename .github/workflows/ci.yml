@@ -1,4 +1,4 @@
-name: Despliegue VPS
+name: Despliegue Automático
 
 on:
   push:
@@ -9,26 +9,51 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
-    
+    - name: Checkout código
+      uses: actions/checkout@v4
+      
     - name: Configurar SSH
       run: |
         mkdir -p ~/.ssh
+        # Guardar clave privada COMPLETA
         echo "${{ secrets.VM_KEY }}" > ~/.ssh/deploy_key
         chmod 600 ~/.ssh/deploy_key
-        echo "Host vps" >> ~/.ssh/config
-        echo "  HostName ${{ secrets.VM_HOST }}" >> ~/.ssh/config
-        echo "  User ${{ secrets.VM_USER }}" >> ~/.ssh/config
-        echo "  IdentityFile ~/.ssh/deploy_key" >> ~/.ssh/config
-        echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+        
+        # Configurar sin confirmaciones
+        cat > ~/.ssh/config << EOF
+        Host azure-vm
+          HostName ${{ secrets.VM_HOST }}
+          User ${{ secrets.VM_USER }}
+          IdentityFile ~/.ssh/deploy_key
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+        EOF
         
     - name: Probar conexión
       run: |
-        ssh vps "echo 'Conectado a VPS'"
+        echo "🔍 Probando conexión SSH..."
+        ssh -o ConnectTimeout=10 azure-vm "echo '✅ Conectado a $(hostname)'" || exit 1
         
-    - name: Copiar código
+    - name: Sincronizar código
       run: |
-        scp -r -i ~/.ssh/deploy_key \
+        echo "📁 Copiando archivos..."
+        rsync -avz --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
           --exclude=.git \
           --exclude=__pycache__ \
-          . ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/billing_api/billing_api/
+          --exclude=*.pyc \
+          --exclude=.env \
+          ./ \
+          ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/billing_api/billing_api/
+          
+    - name: Ejecutar en servidor
+      run: |
+        ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+          ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
+          cd /opt/billing_api/billing_api
+          source /opt/billing_api/venv/bin/activate
+          pip install -r requirements.txt
+          python manage.py migrate --noinput
+          sudo systemctl restart gunicorn
+          sudo systemctl restart nginx
+          echo "✅ Despliegue completado"
+        EOF
