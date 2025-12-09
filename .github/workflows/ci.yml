@@ -1,119 +1,34 @@
-name: Despliegue Automático a Azure
+name: Despliegue VPS
 
 on:
   push:
-    branches: ["main"]
+    branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    
     steps:
-      - name: Checkout del código
-        uses: actions/checkout@v4
-
-      - name: Configurar conexión SSH CORRECTAMENTE
-        run: |
-          # Crear directorio .ssh con permisos correctos
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          
-          # Guardar la clave privada COMPLETA
-          echo "${{ secrets.VM_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          
-          # Configurar ssh para no pedir confirmación
-          echo "Host azure-vm" >> ~/.ssh/config
-          echo "  HostName ${{ secrets.VM_HOST }}" >> ~/.ssh/config
-          echo "  User ${{ secrets.VM_USER }}" >> ~/.ssh/config
-          echo "  IdentityFile ~/.ssh/deploy_key" >> ~/.ssh/config
-          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
-          echo "  UserKnownHostsFile /dev/null" >> ~/.ssh/config
-          echo "  LogLevel ERROR" >> ~/.ssh/config
-          
-          # Probar conexión (esto fallará silenciosamente si hay error)
-          ssh -o ConnectTimeout=5 azure-vm "echo 'Conexión SSH exitosa'" || true
-
-      - name: Probar conexión SSH explícitamente
-        run: |
-          echo "🔍 Probando conexión SSH..."
-          ssh -v -i ~/.ssh/deploy_key ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} "whoami && echo '✅ SSH funciona'" || echo "❌ Falló SSH"
-
-      - name: Actualizar archivo .env en la VM
-        run: |
-          echo "🔄 Actualizando .env en la VM..."
-          # Crear archivo temporal
-          echo "${{ secrets.ENV_FILE }}" > /tmp/env_temp
-          
-          # Copiar usando scp con clave explícita
-          scp -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=no \
-              -o UserKnownHostsFile=/dev/null \
-              /tmp/env_temp \
-              ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/billing_api/.env
-          
-          # Verificar que se copió
-          ssh -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=no \
-              ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} \
-              "ls -la /opt/billing_api/.env && echo '✅ .env copiado correctamente'"
-          
-          rm /tmp/env_temp
-
-      - name: Sincronizar código
-        run: |
-          echo "📁 Sincronizando archivos..."
-          rsync -avz -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
-            --exclude='.git' \
-            --exclude='__pycache__' \
-            --exclude='*.pyc' \
-            --exclude='.env' \
-            --exclude='db.sqlite3' \
-            --exclude='.github' \
-            ./ \
-            ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/billing_api/billing_api/
-
-      - name: Ejecutar comandos en la VM
-        run: |
-          echo "🚀 Ejecutando comandos en la VM..."
-          ssh -i ~/.ssh/deploy_key \
-              -o StrictHostKeyChecking=no \
-              ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
-            
-            echo "📂 Cambiando al directorio del proyecto..."
-            cd /opt/billing_api/billing_api
-            
-            echo "🐍 Activando entorno virtual..."
-            source /opt/billing_api/venv/bin/activate
-            
-            echo "📦 Instalando dependencias..."
-            pip install --upgrade pip
-            pip install -r requirements.txt
-            
-            echo "🔄 Aplicando migraciones..."
-            python manage.py migrate --noinput
-            
-            echo "📊 Recolectando archivos estáticos..."
-            python manage.py collectstatic --noinput --clear
-            
-            echo "🔄 Reiniciando servicios..."
-            sudo systemctl daemon-reload
-            sudo systemctl restart gunicorn
-            sudo systemctl restart nginx
-            
-            echo "✅ Despliegue completado exitosamente!"
-            
-            echo "🔍 Verificando servicios..."
-            sudo systemctl status gunicorn --no-pager
-            sudo systemctl status nginx --no-pager
-            
-          EOF
-
-      - name: Verificar despliegue
-        run: |
-          echo "🌐 Verificando que la API responde..."
-          sleep 5
-          curl -f http://${{ secrets.VM_HOST }}/ || \
-          curl -f http://${{ secrets.VM_HOST }}/api/ || \
-          echo "⚠️  La API podría estar iniciando, verifica manualmente"
+    - uses: actions/checkout@v4
+    
+    - name: Configurar SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.VM_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        echo "Host vps" >> ~/.ssh/config
+        echo "  HostName ${{ secrets.VM_HOST }}" >> ~/.ssh/config
+        echo "  User ${{ secrets.VM_USER }}" >> ~/.ssh/config
+        echo "  IdentityFile ~/.ssh/deploy_key" >> ~/.ssh/config
+        echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+        
+    - name: Probar conexión
+      run: |
+        ssh vps "echo 'Conectado a VPS'"
+        
+    - name: Copiar código
+      run: |
+        scp -r -i ~/.ssh/deploy_key \
+          --exclude=.git \
+          --exclude=__pycache__ \
+          . ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/billing_api/billing_api/
