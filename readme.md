@@ -1,1 +1,4 @@
  docker run -d --name postgres-server -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin123 -e POSTGRES_DB=billing_db -p 5432:5432 -v ${PWD}/pgdata:/var/lib/postgresql/data postgres:16
+
+
+.\.venv\Scripts\activate
