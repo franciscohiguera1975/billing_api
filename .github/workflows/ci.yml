@@ -2,59 +2,71 @@ name: Despliegue Automático
 
 on:
   push:
-    branches: [main]
+    branches: [ "main" ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout código
       uses: actions/checkout@v4
-      
+
     - name: Configurar SSH
       run: |
         mkdir -p ~/.ssh
-        # Guardar clave privada COMPLETA
+
+        # Guardar clave privada desde secret (sin comillas ni espacios)
         echo "${{ secrets.VM_KEY }}" > ~/.ssh/deploy_key
         chmod 600 ~/.ssh/deploy_key
-        
-        # Configurar sin confirmaciones
+
+        # Configuración SSH para conectar sin preguntas
         cat > ~/.ssh/config << EOF
-        Host azure-vm
-          HostName ${{ secrets.VM_HOST }}
-          User ${{ secrets.VM_USER }}
-          IdentityFile ~/.ssh/deploy_key
-          StrictHostKeyChecking no
-          UserKnownHostsFile /dev/null
-        EOF
-        
-    - name: Probar conexión
+Host azure-vm
+  HostName ${{ secrets.VM_HOST }}
+  User ${{ secrets.VM_USER }}
+  IdentityFile ~/.ssh/deploy_key
+  IdentitiesOnly yes
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+EOF
+
+    - name: Probar conexión SSH
       run: |
         echo "🔍 Probando conexión SSH..."
-        ssh -o ConnectTimeout=10 azure-vm "echo '✅ Conectado a $(hostname)'" || exit 1
-        
-    - name: Sincronizar código
+        ssh -o ConnectTimeout=10 azure-vm "echo '✅ Conectado a servidor: $(hostname)'" || exit 1
+
+    - name: Sincronizar código al servidor
       run: |
-        echo "📁 Copiando archivos..."
-        rsync -avz --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+        echo "📁 Copiando archivos al VPS con rsync..."
+        rsync -avz --delete \
+          -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
           --exclude=.git \
           --exclude=__pycache__ \
           --exclude=*.pyc \
           --exclude=.env \
           ./ \
           ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/billing_api/billing_api/
-          
-    - name: Ejecutar en servidor VPS
+
+    - name: Ejecutar comandos remotos (migraciones, reinicios)
       run: |
+        echo "🚀 Ejecutando comandos en el servidor..."
         ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
           ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
           cd /opt/billing_api/billing_api
+
+          echo "📦 Activando entorno virtual..."
           source /opt/billing_api/venv/bin/activate
+
+          echo "📘 Instalando dependencias..."
           pip install -r requirements.txt
+
+          echo "🔄 Ejecutando migraciones..."
           python manage.py migrate --noinput
+
+          echo "♻️ Reiniciando servicios..."
           sudo systemctl restart gunicorn
           sudo systemctl restart nginx
-          echo "✅ Despliegue completado"
-        EOF
-        code 
+
+          echo "✅ Despliegue completado exitosamente"
+EOF
