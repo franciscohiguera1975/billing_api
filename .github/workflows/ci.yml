@@ -45,7 +45,7 @@ jobs:
           ./ \
           ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/opt/billing_api/billing_api/
           
-    - name: Ejecutar en servidor
+    - name: Ejecutar en servidor VPS
       run: |
         ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
           ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
