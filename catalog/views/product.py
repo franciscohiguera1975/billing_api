@@ -1,9 +1,9 @@
-# catalog/views/product.py
 from rest_framework import viewsets, filters
 from catalog.models import Product
 from catalog.serializers import ProductSerializer
 from catalog.permissions import IsAdminOrReadOnly
 from catalog.pagination import StandardResultsSetPagination
+from rest_framework.permissions import AllowAny
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.select_related("category").all()
@@ -23,3 +23,8 @@ class ProductViewSet(viewsets.ModelViewSet):
         if is_active is not None:
             qs = qs.filter(is_active=is_active.lower() in ("1","true","t","yes"))
         return qs
+    
+    def get_permissions(self):
+        if getattr(self, "action", None) == "list":
+            return [AllowAny()]
+        return super().get_permissions()
