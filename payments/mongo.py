@@ -1,4 +1,3 @@
-# payments/mongo.py
 import os
 from pymongo import MongoClient
 

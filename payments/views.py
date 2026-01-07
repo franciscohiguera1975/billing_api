@@ -1,4 +1,3 @@
-# payments/views.py
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -8,14 +7,14 @@ from invoices.models.invoice import Invoice
 from .repositories import ensure_indexes, create_payment_plan, add_payment_transaction, get_plan_with_transactions
 
 class InitMongoIndexesView(APIView):
-    #permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated,)
 
     def post(self, request):
         ensure_indexes()
         return Response({"ok": True})
 
 class PaymentPlanCreateView(APIView):
-    #permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated,)
 
     def post(self, request):
         invoice_id = request.data.get("invoice_id")
