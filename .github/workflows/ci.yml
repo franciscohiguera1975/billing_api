@@ -87,6 +87,7 @@ jobs:
           pip install -r requirements.txt
          
           echo '4. Aplicando migraciones...'
+          python manage.py makemigrations --noinput
           python manage.py migrate --noinput
          
           echo '5. Colectando archivos estáticos...'
